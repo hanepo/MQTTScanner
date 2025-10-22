@@ -1,0 +1,5 @@
+Flask
+flask-cors
+paho-mqtt
+python-dateutil
+requests

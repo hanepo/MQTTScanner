@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MQTT Scanner — Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .badge-sec { background:#ecfdf5; color:#065f46; }
+    .badge-warn { background:#fff7ed; color:#92400e; }
+    .pre-wrap { white-space: pre-wrap; word-break: break-word; }
+    .small-muted { font-size: .9rem; color: #6b7280; }
+  </style>
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+  <div class="container">
+    <a class="navbar-brand" href="#">MQTT Scanner</a>
+    <div class="ms-auto">
+      <a href="/logout" class="btn btn-outline-secondary btn-sm">Logout</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <form id="scan-form" class="row g-2 align-items-center">
+        <div class="col-auto">
+          <input id="target" class="form-control" value="127.0.0.1" placeholder="127.0.0.1 or 192.168.1.0/24">
+        </div>
+        <div class="col-auto">
+          <input id="user" class="form-control" placeholder="username (optional)">
+        </div>
+        <div class="col-auto">
+          <input id="pass" type="password" class="form-control" placeholder="password (optional)">
+        </div>
+        <div class="col-auto">
+          <button id="btn-scan" class="btn btn-primary">Scan</button>
+          <button type="button" class="btn btn-secondary" onclick="fetchResults()">Refresh</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="downloadCSV()">Export CSV</button>
+        </div>
+        <div class="col-12 mt-2">
+          <div id="status" class="small-muted">Status: idle</div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="results-area">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Scan Results</h5>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead class="table-light">
+              <tr>
+                <th>IP</th><th>Port</th><th>Result</th><th>Classification</th><th>TLS</th><th>Time</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-3 shadow-sm">
+      <div class="card-body">
+        <h6>Details (selected)</h6>
+        <div id="detail-box" class="pre-wrap small-muted">Click an item "Details" to see TLS cert snippet or broker $SYS info here.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const FLASK_BASE = 'http://127.0.0.1:5000';
+const API_KEY = 'my-very-secret-flask-key-CHANGEME';
+const STATUS = document.getElementById('status');
+const RESULTS_BODY = document.getElementById('results-body');
+const DETAIL_BOX = document.getElementById('detail-box');
+
+function setStatus(t){ STATUS.innerText = 'Status: ' + t; }
+
+function badgeFor(r){
+  if(!r.classification) return 'badge bg-light';
+  const c = r.classification.toLowerCase();
+  if(c.includes('open') || c.includes('ok')) return 'badge badge-sec px-2 py-1';
+  if(c.includes('tls') || c.includes('not_authorized') || c.includes('error')) return 'badge badge-warn px-2 py-1';
+  return 'badge bg-light';
+}
+
+function toRow(r, i){
+  const tls = r.tls ? 'Yes' : 'No';
+  return `
+    <tr>
+      <td>${r.ip}</td>
+      <td>${r.port}</td>
+      <td>${r.result}</td>
+      <td><span class="${badgeFor(r)}">${r.classification}</span></td>
+      <td>${tls}</td>
+      <td>${r.timestamp}</td>
+      <td>
+        <button class="btn btn-sm btn-outline-primary" onclick="showDetails(${i})">Details</button>
+      </td>
+    </tr>
+  `;
+}
+
+let latestResults = [];
+
+function populate(results){
+  latestResults = results || [];
+  RESULTS_BODY.innerHTML = '';
+  if(!results || results.length===0){
+    RESULTS_BODY.innerHTML = '<tr><td colspan="7" class="small-muted">No results. Click Scan.</td></tr>';
+    return;
+  }
+  results.forEach((r,i)=> RESULTS_BODY.insertAdjacentHTML('beforeend', toRow(r,i)));
+}
+
+async function fetchResults(){
+  setStatus('fetching results...');
+  try{
+    const res = await fetch(`${FLASK_BASE}/api/results`, {
+      credentials: 'include',
+      headers: {'X-API-KEY': API_KEY}
+    });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    populate(data);
+    setStatus('last updated: ' + new Date().toLocaleTimeString());
+  }catch(e){
+    console.error(e);
+    setStatus('error: ' + e.message);
+  }
+}
+
+async function triggerScan(evt){
+  if(evt) evt.preventDefault();
+  setStatus('running scan...');
+  const target = document.getElementById('target').value || '127.0.0.1';
+  const user = document.getElementById('user').value || null;
+  const pass = document.getElementById('pass').value || null;
+  const creds = (user && pass) ? {user, pass} : null;
+  document.getElementById('btn-scan').disabled = true;
+  try{
+    const res = await fetch(`${FLASK_BASE}/api/scan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':'application/json',
+        'X-API-KEY': API_KEY
+      },
+      credentials: 'include',
+      body: JSON.stringify({target, creds})
+    });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    populate(json.results || []);
+    setStatus('scan finished: ' + (json.results ? json.results.length : 0));
+  }catch(e){
+    console.error(e);
+    setStatus('error: ' + e.message);
+  }finally{
+    document.getElementById('btn-scan').disabled = false;
+  }
+}
+
+function showDetails(index){
+  const r = latestResults[index];
+  if(!r) return;
+  let text = `IP: ${r.ip}\nPort: ${r.port}\nResult: ${r.result}\nClassification: ${r.classification}\nTLS: ${r.tls}\nTime: ${r.timestamp}\n\n`;
+  if(r.cert_snippet) text += `--- Cert snippet ---\n${r.cert_snippet}\n\n`;
+  if(r.broker_sys) text += `--- Broker $SYS probe (small) ---\n${JSON.stringify(r.broker_sys, null, 2)}\n\n`;
+  DETAIL_BOX.innerText = text;
+}
+
+function downloadCSV(){
+  // build CSV from latestResults
+  if(!latestResults || latestResults.length===0){ alert('No data'); return; }
+  const header = ['ip','port','result','classification','timestamp'];
+  const rows = latestResults.map(r => header.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
+  const csv = [header.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download='mqtt_scan_report.csv'; a.click(); URL.revokeObjectURL(url);
+}
+
+document.addEventListener('DOMContentLoaded', ()=> fetchResults());
+document.getElementById('scan-form').addEventListener('submit', triggerScan);
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  mosquitto_insecure:
+    image: eclipse-mosquitto:2.0
+    container_name: mosq_insecure
+    volumes:
+      - ./insecure/config:/mosquitto/config
+      - ./insecure/data:/mosquitto/data
+      - ./insecure/log:/mosquitto/log
+    ports:
+      - "1883:1883"
+
+  mosquitto_secure:
+    image: eclipse-mosquitto:2.0
+    container_name: mosq_secure
+    volumes:
+      - ./secure/config:/mosquitto/config
+      - ./secure/data:/mosquitto/data
+      - ./secure/log:/mosquitto/log
+      - ./secure/certs:/mosquitto/certs
+    ports:
+      - "8883:8883"

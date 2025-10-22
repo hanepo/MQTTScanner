@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>MQTT Scanner</title></head>
+<body>
+  <h2>MQTT Scanner (Demo)</h2>
+
+  <div>
+    <label>Target: <input id="target" placeholder="127.0.0.1 or 192.168.1.0/24" value="127.0.0.1"/></label>
+  </div>
+  <div>
+    <label>Username (optional): <input id="user" placeholder="testuser"/></label>
+    <label>Password (optional): <input id="pass" type="password" placeholder="testpass"/></label>
+  </div>
+  <button onclick="run()">Scan</button>
+  <pre id="out"></pre>
+
+<script>
+async function run(){
+  document.getElementById('out').innerText = 'Scanning...';
+  const target=document.getElementById('target').value;
+  const user=document.getElementById('user').value;
+  const pass=document.getElementById('pass').value;
+  const creds = (user && pass) ? {user:user, pass:pass} : null;
+  const res = await fetch('/api/scan', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({target: target, creds: creds})
+  });
+  const j = await res.json();
+  document.getElementById('out').innerText = JSON.stringify(j, null, 2);
+}
+</script>
+</body>
+</html>
