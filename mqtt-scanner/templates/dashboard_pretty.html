@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>MQTT Scanner — Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <style>
-    .badge-sec { background:#ecfdf5; color:#065f46; }
-    .badge-warn { background:#fff7ed; color:#92400e; }
-    .pre-wrap { white-space: pre-wrap; word-break: break-word; }
+    .badge-sec { background:#ecfdf5; color:#065f46; border-radius:.25rem; padding:.25rem .5rem; }
+    .badge-warn { background:#fff7ed; color:#92400e; border-radius:.25rem; padding:.25rem .5rem; }
+    .pre-wrap { white-space: pre-wrap; word-break: break-word; font-family:monospace; font-size:.875rem; }
     .small-muted { font-size: .9rem; color: #6b7280; }
+    .small-code { background:#f8fafc;padding:6px;border-radius:6px;font-family:monospace }
   </style>
 </head>
 <body class="bg-light">
@@ -36,6 +38,15 @@
           <input id="pass" type="password" class="form-control" placeholder="password (optional)">
         </div>
         <div class="col-auto">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="deepToggle">
+            <label class="form-check-label small-muted" for="deepToggle">Deep scan (capture live messages)</label>
+          </div>
+        </div>
+        <div class="col-auto">
+          <input id="listenSecs" type="number" class="form-control" value="3" style="width:80px" min="1" max="20">
+        </div>
+        <div class="col-auto">
           <button id="btn-scan" class="btn btn-primary">Scan</button>
           <button type="button" class="btn btn-secondary" onclick="fetchResults()">Refresh</button>
           <button type="button" class="btn btn-outline-secondary" onclick="downloadCSV()">Export CSV</button>
@@ -55,7 +66,7 @@
           <table class="table table-sm table-hover">
             <thead class="table-light">
               <tr>
-                <th>IP</th><th>Port</th><th>Result</th><th>Classification</th><th>TLS</th><th>Time</th><th>Actions</th>
+                <th>IP</th><th>Port</th><th>Result</th><th>Classification</th><th>Security Risk</th><th>TLS</th><th>Time</th><th>Actions</th>
               </tr>
             </thead>
             <tbody id="results-body"></tbody>
@@ -67,37 +78,49 @@
     <div class="card mt-3 shadow-sm">
       <div class="card-body">
         <h6>Details (selected)</h6>
-        <div id="detail-box" class="pre-wrap small-muted">Click an item "Details" to see TLS cert snippet or broker $SYS info here.</div>
+        <div id="detail-box" class="pre-wrap small-muted">Click "Details" on a row to view certificate details, $SYS info, retained topics and live messages.</div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-const FLASK_BASE = 'http://127.0.0.1:5000';
-const API_KEY = 'my-very-secret-flask-key-CHANGEME';
 const STATUS = document.getElementById('status');
 const RESULTS_BODY = document.getElementById('results-body');
 const DETAIL_BOX = document.getElementById('detail-box');
+let latestResults = [];
 
 function setStatus(t){ STATUS.innerText = 'Status: ' + t; }
-
 function badgeFor(r){
   if(!r.classification) return 'badge bg-light';
   const c = r.classification.toLowerCase();
-  if(c.includes('open') || c.includes('ok')) return 'badge badge-sec px-2 py-1';
-  if(c.includes('tls') || c.includes('not_authorized') || c.includes('error')) return 'badge badge-warn px-2 py-1';
+  if(c.includes('open') || c.includes('ok')) return 'badge badge-sec';
+  if(c.includes('tls') || c.includes('not_authorized') || c.includes('error')) return 'badge badge-warn';
   return 'badge bg-light';
+}
+
+function riskBadge(r){
+  const risk = r.security_summary?.risk_level || 'UNKNOWN';
+  const badges = {
+    'CRITICAL': 'badge bg-danger',
+    'HIGH': 'badge bg-warning text-dark',
+    'MEDIUM': 'badge bg-info text-dark',
+    'LOW': 'badge bg-success',
+    'UNKNOWN': 'badge bg-secondary'
+  };
+  return `<span class="${badges[risk]}">${risk}</span>`;
 }
 
 function toRow(r, i){
   const tls = r.tls ? 'Yes' : 'No';
+  const riskLevel = riskBadge(r);
   return `
     <tr>
       <td>${r.ip}</td>
       <td>${r.port}</td>
       <td>${r.result}</td>
       <td><span class="${badgeFor(r)}">${r.classification}</span></td>
+      <td>${riskLevel}</td>
       <td>${tls}</td>
       <td>${r.timestamp}</td>
       <td>
@@ -106,8 +129,6 @@ function toRow(r, i){
     </tr>
   `;
 }
-
-let latestResults = [];
 
 function populate(results){
   latestResults = results || [];
@@ -122,10 +143,7 @@ function populate(results){
 async function fetchResults(){
   setStatus('fetching results...');
   try{
-    const res = await fetch(`${FLASK_BASE}/api/results`, {
-      credentials: 'include',
-      headers: {'X-API-KEY': API_KEY}
-    });
+    const res = await fetch('/api/results', { credentials: 'same-origin' });
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     populate(data);
@@ -142,22 +160,27 @@ async function triggerScan(evt){
   const target = document.getElementById('target').value || '127.0.0.1';
   const user = document.getElementById('user').value || null;
   const pass = document.getElementById('pass').value || null;
-  const creds = (user && pass) ? {user, pass} : null;
+  const creds = (user && pass) ? { user, pass } : null;
+  const capture_all = document.getElementById('deepToggle').checked;
+  const listen_secs = parseInt(document.getElementById('listenSecs').value || '3');
+
   document.getElementById('btn-scan').disabled = true;
   try{
-    const res = await fetch(`${FLASK_BASE}/api/scan`, {
+    const res = await fetch('/api/scan', {
       method: 'POST',
       headers: {
-        'Content-Type':'application/json',
-        'X-API-KEY': API_KEY
+        'Content-Type': 'application/json',
+        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
       },
-      credentials: 'include',
-      body: JSON.stringify({target, creds})
+      credentials: 'same-origin',
+      body: JSON.stringify({ target, creds, capture_all_topics: capture_all, listen_duration: listen_secs })
     });
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const json = await res.json();
-    populate(json.results || []);
-    setStatus('scan finished: ' + (json.results ? json.results.length : 0));
+    // server returns enriched results under json.results or direct array; handle both
+    const rows = json.results || json;
+    populate(rows);
+    setStatus('scan finished: ' + (rows.length || 0));
   }catch(e){
     console.error(e);
     setStatus('error: ' + e.message);
@@ -169,15 +192,173 @@ async function triggerScan(evt){
 function showDetails(index){
   const r = latestResults[index];
   if(!r) return;
-  let text = `IP: ${r.ip}\nPort: ${r.port}\nResult: ${r.result}\nClassification: ${r.classification}\nTLS: ${r.tls}\nTime: ${r.timestamp}\n\n`;
-  if(r.cert_snippet) text += `--- Cert snippet ---\n${r.cert_snippet}\n\n`;
-  if(r.broker_sys) text += `--- Broker $SYS probe (small) ---\n${JSON.stringify(r.broker_sys, null, 2)}\n\n`;
+
+  let text = `╔════════════════════════════════════════════════════════════╗
+║                    MQTT SECURITY SCAN REPORT                ║
+╚════════════════════════════════════════════════════════════╝
+
+📍 TARGET INFORMATION
+IP Address: ${r.ip}
+Port: ${r.port} (${r.port === 1883 ? 'Insecure MQTT' : r.port === 8883 ? 'Secure MQTT/TLS' : 'Non-standard'})
+Result: ${r.result}
+Classification: ${r.classification}
+Timestamp: ${r.timestamp}
+
+`;
+
+  // Security Summary
+  if(r.security_summary){
+    const riskEmoji = {
+      'CRITICAL': '🔴',
+      'HIGH': '🟠',
+      'MEDIUM': '🟡',
+      'LOW': '🟢',
+      'UNKNOWN': '⚪'
+    };
+    text += `🔒 SECURITY ASSESSMENT
+Risk Level: ${riskEmoji[r.security_summary.risk_level] || ''} ${r.security_summary.risk_level}
+
+`;
+
+    if(r.security_summary.issues && r.security_summary.issues.length > 0){
+      text += `⚠️  Security Issues Found:\n`;
+      r.security_summary.issues.forEach(issue => {
+        text += `   • ${issue}\n`;
+      });
+      text += '\n';
+    }
+
+    if(r.security_summary.recommendations && r.security_summary.recommendations.length > 0){
+      text += `💡 Recommendations:\n`;
+      r.security_summary.recommendations.forEach(rec => {
+        text += `   ✓ ${rec}\n`;
+      });
+      text += '\n';
+    }
+  }
+
+  // Security Assessment Details
+  if(r.security_assessment){
+    text += `🛡️  ACCESS CONTROL
+Anonymous Access: ${r.security_assessment.anonymous_allowed ? '❌ ALLOWED (Security Risk!)' : '✅ Disabled'}
+Authentication: ${r.security_assessment.requires_auth ? '✅ Required' : '❌ Not Required'}
+Port Type: ${r.security_assessment.port_type === 'secure' ? '🔐 Secure (TLS)' : '⚠️  Insecure (Plain)'}
+
+`;
+  }
+
+  // TLS Analysis
+  if(r.tls_analysis){
+    text += `🔐 TLS/SSL CERTIFICATE ANALYSIS\n`;
+    if(r.tls_analysis.error){
+      text += `Error: ${r.tls_analysis.error}\n\n`;
+    } else if(r.tls_analysis.has_tls){
+      const cert = r.tls_analysis.cert_details;
+      text += `Certificate Status: ${r.tls_analysis.cert_valid ? '✅ Valid' : '❌ Invalid'}\n`;
+      text += `Security Score: ${r.tls_analysis.security_score}/100\n\n`;
+
+      text += `Certificate Details:\n`;
+      text += `   Common Name: ${cert.common_name || 'N/A'}\n`;
+      text += `   Organization: ${cert.organization || 'N/A'}\n`;
+      text += `   Valid From: ${cert.valid_from || 'N/A'}\n`;
+      text += `   Valid To: ${cert.valid_to || 'N/A'}\n`;
+      if(cert.days_until_expiry !== undefined){
+        text += `   Days Until Expiry: ${cert.days_until_expiry}\n`;
+      }
+      text += `   Self-Signed: ${cert.self_signed ? '⚠️  Yes' : '✅ No'}\n`;
+      text += `   Expired: ${cert.expired ? '❌ Yes' : '✅ No'}\n`;
+      text += `   TLS Version: ${cert.tls_version || 'Unknown'}\n`;
+      if(cert.cipher){
+        text += `   Cipher Suite: ${cert.cipher[0]} (${cert.cipher[1]}, ${cert.cipher[2]} bits)\n`;
+      }
+      text += `   Serial Number: ${cert.serial_number || 'N/A'}\n`;
+      if(cert.fingerprint_sha256){
+        text += `   SHA256 Fingerprint: ${cert.fingerprint_sha256}\n`;
+      }
+      text += '\n';
+
+      if(r.tls_analysis.security_issues && r.tls_analysis.security_issues.length > 0){
+        text += `⚠️  TLS Security Issues:\n`;
+        r.tls_analysis.security_issues.forEach(issue => {
+          text += `   • ${issue}\n`;
+        });
+        text += '\n';
+      }
+    }
+  }
+
+  // Publishers and Subscribers
+  if(r.publishers && r.publishers.length > 0){
+    text += `📤 DETECTED PUBLISHERS (${r.publishers.length})\n`;
+    r.publishers.forEach((pub, idx) => {
+      text += `   ${idx + 1}. Topic: ${pub.topic}\n`;
+      text += `      Payload Size: ${pub.payload_size} bytes\n`;
+      text += `      QoS: ${pub.qos}, Retained: ${pub.retained}\n`;
+      if(pub.client_id_note){
+        text += `      Note: ${pub.client_id_note}\n`;
+      }
+    });
+    text += '\n';
+  } else {
+    text += `📤 PUBLISHERS: None detected during scan\n\n`;
+  }
+
+  if(r.subscribers && r.subscribers.length > 0){
+    text += `📥 DETECTED SUBSCRIBERS (${r.subscribers.length})\n`;
+    r.subscribers.forEach((sub, idx) => {
+      text += `   ${idx + 1}. Client ID: ${sub.client_id}\n`;
+      if(sub.detected_via){
+        text += `      Detected via: ${sub.detected_via}\n`;
+      }
+      if(sub.note){
+        text += `      Note: ${sub.note}\n`;
+      }
+    });
+    text += '\n';
+  } else {
+    text += `📥 SUBSCRIBERS: None detected during scan\n\n`;
+  }
+
+  // Topics Discovered
+  if(r.topics_discovered && Object.keys(r.topics_discovered).length > 0){
+    text += `📋 ACTIVE TOPICS DISCOVERED (${Object.keys(r.topics_discovered).length})\n`;
+    Object.entries(r.topics_discovered).forEach(([topic, info]) => {
+      text += `   • ${topic}\n`;
+      text += `     First Seen: ${info.first_seen}\n`;
+      text += `     Message Count: ${info.message_count}\n`;
+    });
+    text += '\n';
+  }
+
+  // Broker Info (from app.py probe)
+  if(r.broker_info){
+    text += `🖥️  BROKER INFORMATION\n`;
+    if(r.broker_info.error){
+      text += `Error: ${r.broker_info.error}\n`;
+    } else {
+      text += `$SYS Topics: ${r.broker_info.sys_count || 0}\n`;
+      text += `Regular Topics: ${r.broker_info.regular_count || 0}\n`;
+      text += `Retained Topics: ${r.broker_info.retained_topics?.length || 0}\n`;
+    }
+    text += '\n';
+  }
+
+  // Certificate Info (from app.py)
+  if(r.cert_info && !r.tls_analysis){
+    text += `📜 CERTIFICATE INFO (from app probe)\n`;
+    if(r.cert_info.error){
+      text += `${r.cert_info.error}\n\n`;
+    } else {
+      text += JSON.stringify(r.cert_info, null, 2) + '\n\n';
+    }
+  }
+
   DETAIL_BOX.innerText = text;
 }
 
 function downloadCSV(){
-  // build CSV from latestResults
-  if(!latestResults || latestResults.length===0){ alert('No data'); return; }
+  // attempt to use last displayed rows
+  if(!latestResults || latestResults.length===0){ alert('No rows'); return; }
   const header = ['ip','port','result','classification','timestamp'];
   const rows = latestResults.map(r => header.map(h => `"${(r[h]||'').toString().replace(/"/g,'""')}"`).join(','));
   const csv = [header.join(','), ...rows].join('\n');
@@ -187,8 +368,10 @@ function downloadCSV(){
   a.href = url; a.download='mqtt_scan_report.csv'; a.click(); URL.revokeObjectURL(url);
 }
 
-document.addEventListener('DOMContentLoaded', ()=> fetchResults());
-document.getElementById('scan-form').addEventListener('submit', triggerScan);
+document.addEventListener('DOMContentLoaded', ()=> {
+  fetchResults();
+  document.getElementById('scan-form').addEventListener('submit', triggerScan);
+});
 </script>
 </body>
 </html>
