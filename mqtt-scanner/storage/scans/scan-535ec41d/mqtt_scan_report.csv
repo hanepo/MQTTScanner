@@ -1,0 +1,3 @@
+IP,Port,Result,Classification,Timestamp,Details
+192.168.100.140,1883,connected,Critical,2025-11-02T19:13:11.024093,TLS: No
+192.168.100.140,8883,connect_failed (rc=5),Unknown,2025-11-02T19:13:16.666899,TLS: No

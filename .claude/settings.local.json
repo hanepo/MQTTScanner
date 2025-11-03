@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(composer require:*)",
+      "Bash(php artisan serve:*)",
+      "Bash(findstr:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(php -r:*)",
+      "Bash(timeout 10 php:*)",
+      "Bash(composer show:*)",
+      "Bash(curl:*)",
+      "Bash(php artisan:*)",
+      "Bash(dir:*)",
+      "Bash(git checkout:*)",
+      "Bash(python app.py:*)",
+      "Bash(timeout 3 bash:*)",
+      "Bash(timeout 8 bash:*)",
+      "Bash(cat:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(cd:*)",
+      "Bash(php:*)",
+      "Bash(docker --version:*)",
+      "Bash(nul)",
+      "Bash(databasedatabase.sqlite)",
+      "Bash(set:*)",
+      "Bash(start_flask.bat)",
+      "Bash(chcp 65001)",
+      "Bash(timeout 10 bash:*)",
+      "Bash(cmd /c \"cd mqtt-scanner && set PYTHONIOENCODING=utf-8 && python app.py\")",
+      "Bash(docker ps:*)",
+      "Bash(pip show:*)",
+      "Bash(timeout 5 mosquitto_sub:*)",
+      "Bash(docker exec:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

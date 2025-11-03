@@ -1,0 +1,3 @@
+IP,Port,Result,Classification,Timestamp,Details
+192.168.100.0/24,1883,error: [Errno 11001] getaddrinfo failed,Unknown,2025-11-02T19:13:02.069428,TLS: No
+192.168.100.0/24,8883,error: [Errno 11001] getaddrinfo failed,Unknown,2025-11-02T19:13:02.073014,TLS: No

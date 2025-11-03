@@ -1,0 +1,3 @@
+IP,Port,Result,Classification,Timestamp,Details
+127.0.0.1,1883,connected,Critical,2025-11-02T19:05:29.131849,TLS: No
+127.0.0.1,8883,connected,Critical,2025-11-02T19:05:36.732156,TLS: No

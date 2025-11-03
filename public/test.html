@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Button Test</title>
+</head>
+<body>
+    <button id="testBtn">Click Me</button>
+    <div id="output"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded');
+
+            const btn = document.getElementById('testBtn');
+            console.log('Button found:', btn);
+
+            btn.addEventListener('click', function() {
+                console.log('Button clicked!');
+                document.getElementById('output').innerHTML = 'Button works!';
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+IP,Port,Result,Classification,Timestamp,Details
+127.0.0.1,1883,connected,Critical,2025-11-02T05:01:12.878668,Topics: 51
+127.0.0.1,8883,connect_failed (Connection failed with code 5),Unknown,2025-11-02T05:01:18.048216,TLS: Valid
